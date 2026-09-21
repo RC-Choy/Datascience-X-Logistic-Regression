@@ -1,4 +1,4 @@
-"""Train one-vs-all logistic regression using batch or stochastic gradient descent."""
+"""Train one-vs-all logistic regression using batch, mini-batch, or stochastic GD."""
 
 import csv
 import math
@@ -24,6 +24,7 @@ HOUSES = [
 ]
 LEARNING_RATE = 0.01
 ITERATIONS = 10000
+BATCH_SIZE = 32
 MODEL_PATH = Path("model_parameters.csv")
 
 
@@ -178,6 +179,33 @@ def gradient_descent(
     return bias, weights
 
 
+def mini_batch_gradient_descent(
+    X: Sequence[Sequence[float]], y: Sequence[int]
+) -> tuple[float, list[float]]:
+    weights = [0.0] * len(FEATURES)
+    bias = 0.0
+    m = len(X)
+    for _ in range(ITERATIONS):
+        indices = list(range(m))
+        random.shuffle(indices)
+        for start in range(0, m, BATCH_SIZE):
+            batch_indices = indices[start:start + BATCH_SIZE]
+            X_batch = [X[index] for index in batch_indices]
+            y_batch = [y[index] for index in batch_indices]
+            probabilities = calculate_probabilities(X_batch, weights, bias)
+            weight_gradients, bias_gradient = calculate_gradients(
+                X_batch, y_batch, probabilities
+            )
+            for feature_index in range(len(FEATURES)):
+                weights[feature_index] -= LEARNING_RATE * weight_gradients[feature_index]
+            bias -= LEARNING_RATE * bias_gradient
+            if not math.isfinite(bias) or any(
+                not math.isfinite(weight) for weight in weights
+            ):
+                raise ValueError("trained parameters are not finite")
+    return bias, weights
+
+
 def stochastic_gradient_descent(
     X: Sequence[Sequence[float]], y: Sequence[int]
 ) -> tuple[float, list[float]]:
@@ -209,16 +237,19 @@ def select_training_algorithm() -> Callable[
 ]:
     while True:
         print("Select training algorithm:")
-        print("1. Gradient Descent")
-        print("2. Stochastic Gradient Descent")
+        print("1. Batch Gradient Descent")
+        print("2. Mini-Batch Gradient Descent")
+        print("3. Stochastic Gradient Descent")
         choice = input().strip()
         match choice:
             case "1":
                 return gradient_descent
             case "2":
+                return mini_batch_gradient_descent
+            case "3":
                 return stochastic_gradient_descent
             case _:
-                print("Error: please enter 1 or 2.")
+                print("Error: please enter 1, 2, or 3.")
 
 
 def train_one_vs_all(
