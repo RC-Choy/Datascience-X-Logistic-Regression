@@ -1,7 +1,8 @@
-"""Train one-vs-all logistic regression using manual batch gradient descent."""
+"""Train one-vs-all logistic regression using batch or stochastic gradient descent."""
 
 import csv
 import math
+import random
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -177,6 +178,49 @@ def gradient_descent(
     return bias, weights
 
 
+def stochastic_gradient_descent(
+    X: Sequence[Sequence[float]], y: Sequence[int]
+) -> tuple[float, list[float]]:
+    weights = [0.0] * len(FEATURES)
+    bias = 0.0
+    for _ in range(ITERATIONS):
+        indices = list(range(len(X)))
+        random.shuffle(indices)
+        for sample_index in indices:
+            sample = X[sample_index]
+            z = bias
+            for feature_index in range(len(FEATURES)):
+                z += weights[feature_index] * sample[feature_index]
+            probability = sigmoid(z)
+            error = probability - y[sample_index]
+            for feature_index in range(len(FEATURES)):
+                gradient = error * sample[feature_index]
+                weights[feature_index] -= LEARNING_RATE * gradient
+            bias -= LEARNING_RATE * error
+            if not math.isfinite(bias) or any(
+                not math.isfinite(weight) for weight in weights
+            ):
+                raise ValueError("trained parameters are not finite")
+    return bias, weights
+
+
+def select_training_algorithm() -> Callable[
+    [Sequence[Sequence[float]], Sequence[int]], tuple[float, list[float]]
+]:
+    while True:
+        print("Select training algorithm:")
+        print("1. Gradient Descent")
+        print("2. Stochastic Gradient Descent")
+        choice = input().strip()
+        match choice:
+            case "1":
+                return gradient_descent
+            case "2":
+                return stochastic_gradient_descent
+            case _:
+                print("Error: please enter 1 or 2.")
+
+
 def train_one_vs_all(
     X: Sequence[Sequence[float]],
     houses: Sequence[str],
@@ -250,7 +294,8 @@ def main() -> int:
         medians = calculate_feature_medians(rows, feature_columns)
         X, houses = organize_training_data(rows, house_index, feature_columns, medians)
         normalized_X, minimums, maximums = normalize_features(X)
-        normalized_models = train_one_vs_all(normalized_X, houses, gradient_descent)
+        optimizer = select_training_algorithm()
+        normalized_models = train_one_vs_all(normalized_X, houses, optimizer)
         models = convert_models(normalized_models, minimums, maximums)
         save_model_parameters(models, medians, MODEL_PATH)
         print(f"Training complete. Medians and thetas saved to '{MODEL_PATH.name}'.")
