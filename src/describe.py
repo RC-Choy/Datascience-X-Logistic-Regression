@@ -134,26 +134,22 @@ def calculate_min(sorted_values: Sequence[float]) -> float:
 
 
 def calculate_quartile(sorted_values: Sequence[float], p: float) -> float:
-    """Use exclusive ranks p * (n + 1), with one-based statistical ranks."""
+    """Calculate exclusive quartiles with endpoint clamping."""
     count = len(sorted_values)
-    if count < 2:
-        raise ValueError("exclusive quartiles require at least two valid values")
+    if count == 0:
+        raise ValueError("quartiles require at least one valid value")
     if p not in (0.25, 0.50, 0.75):
         raise ValueError("quartile probability must be 0.25, 0.50, or 0.75")
     position = p * (count + 1)
+    if position <= 1:
+        return sorted_values[0]
+    if position >= count:
+        return sorted_values[-1]
+
     lower_rank = int(position)
-    # Keep two neighboring values available. For n=2, Q1 and Q3 extrapolate.
-    if lower_rank < 1:
-        lower_rank = 1
-    elif lower_rank >= count:
-        lower_rank = count - 1
     fraction = position - lower_rank
     lower = sorted_values[lower_rank - 1]
     upper = sorted_values[lower_rank]
-    if fraction == 0:
-        return lower
-    if fraction == 1:
-        return upper
     return (1 - fraction) * lower + fraction * upper
 
 
