@@ -6,40 +6,67 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from describe import is_numerical_feature, read_csv
-from logreg_train import sigmoid
+from logreg_train import HOUSES, sigmoid
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODEL_PATH = PROJECT_ROOT / "model_parameters.csv"
 OUTPUT_PATH = PROJECT_ROOT / "houses.csv"
 
 
-def validate_arguments() -> Path:
-    if len(sys.argv) != 2:
-        raise ValueError("usage: python3 src/logreg_predict.py <csv_file>")
-    return Path(sys.argv[1])
+def validate_arguments() -> tuple[Path, Path]:
+    if len(sys.argv) != 3:
+        raise ValueError("usage: python3 src/logreg_predict.py <dataset_test.csv> <model_parameters.csv>")
+    return (Path(sys.argv[1]), Path(sys.argv[2]))
 
 
 def load_model_parameters(
     model_path: Path,
 ) -> tuple[list[str], dict[str, float], dict[str, tuple[float, list[float]]]]:
     headers, rows = read_csv(model_path)
+
+    if headers[:2] != ["House", "Bias"] or len(headers) < 3:
+        raise ValueError(
+            "Model CSV must start with House, Bias, followed by feature columns"
+        )
+    if not rows:
+        raise ValueError("Model CSV is missing median and house model rows")
+
     features = headers[2:]
     median_row = rows[0]
+    if median_row[0] != "Median":
+        raise ValueError("First model CSV data row must be labelled Median")
+
     medians = {}
     for column, feature in enumerate(features, start=2):
+        if not is_numerical_feature([median_row], column):
+            raise ValueError(f"Median for {feature} must be a finite number")
         medians[feature] = float(median_row[column])
 
-    house_column = headers.index("House")
-    bias_column = headers.index("Bias")
     models = {}
     for row in rows[1:]:
-        house = row[house_column]
-        bias = float(row[bias_column])
+        house = row[0]
+        if house not in HOUSES:
+            raise ValueError(f"Model CSV contains unknown house: {house!r}")
+        if house in models:
+            raise ValueError(f"Model CSV contains duplicate house: {house}")
+
+        for column in range(1, len(headers)):
+            if not is_numerical_feature([row], column):
+                raise ValueError(
+                    f"{house}: {headers[column]} must be a finite number"
+                )
+
+        bias = float(row[1])
         weights = []
         for column in range(2, len(headers)):
             weights.append(float(row[column]))
         models[house] = (bias, weights)
+
+    missing_houses = [house for house in HOUSES if house not in models]
+    if missing_houses:
+        raise ValueError(
+            f"Model CSV is missing houses: {', '.join(missing_houses)}"
+        )
     return features, medians, models
 
 
@@ -119,8 +146,8 @@ def save_predictions(
 
 def main() -> int:
     try:
-        dataset_path = validate_arguments()
-        features, medians, models = load_model_parameters(MODEL_PATH)
+        dataset_path, model_path = validate_arguments()
+        features, medians, models = load_model_parameters(model_path)
         headers, rows = read_csv(dataset_path)
         index_column, feature_columns = validate_test_columns(headers, rows, features)
         indices, X = organize_test_data(
@@ -128,6 +155,7 @@ def main() -> int:
         )
         predictions = predict_houses(X, models)
         save_predictions(indices, predictions, OUTPUT_PATH)
+        print(f"Prediction complete. Houses saved to '{OUTPUT_PATH.name}'.")
         return 0
     except (OSError, UnicodeError, ValueError, ArithmeticError, csv.Error) as error:
         print(f"Error: {error}", file=sys.stderr)
