@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from describe import is_numerical_feature, read_csv
+from describe import calculate_quartile, extract_values, is_numerical_feature, read_csv
 
 
 FEATURES = [
@@ -23,7 +23,7 @@ HOUSES = [
 ]
 LEARNING_RATE = 0.01
 ITERATIONS = 10000
-THETA_PATH = Path("thetas.csv")
+MODEL_PATH = Path("model_parameters.csv")
 
 
 def validate_arguments() -> Path:
@@ -49,8 +49,27 @@ def validate_training_columns(
     return house_index, feature_columns
 
 
+def calculate_feature_medians(
+    rows: Sequence[Sequence[str]], feature_columns: Sequence[int]
+) -> dict[str, float]:
+    """Calculate original-scale medians from the validated training CSV only."""
+    medians = {}
+    for feature_name, feature_index in zip(FEATURES, feature_columns):
+        values = extract_values(rows, feature_index)
+        if not values:
+            raise ValueError(f"{feature_name} contains no values for its training median")
+        # The quartile helper requires two values; a singleton is its own median.
+        medians[feature_name] = (
+            values[0] if len(values) == 1 else calculate_quartile(values, 0.5)
+        )
+    return medians
+
+
 def organize_training_data(
-    rows: Sequence[Sequence[str]], house_index: int, feature_columns: Sequence[int]
+    rows: Sequence[Sequence[str]],
+    house_index: int,
+    feature_columns: Sequence[int],
+    medians: dict[str, float],
 ) -> tuple[list[list[float]], list[str]]:
     X = []
     houses = []
@@ -59,13 +78,10 @@ def organize_training_data(
         if house not in HOUSES:
             continue
         feature_values = []
-        for feature_index in feature_columns:
+        for feature_name, feature_index in zip(FEATURES, feature_columns):
             cell = row[feature_index].strip()
-            if not cell:
-                break
-            feature_values.append(float(cell))
-        if len(feature_values) != len(feature_columns):
-            continue
+            value = float(cell) if cell else medians[feature_name]
+            feature_values.append(value)
         X.append(feature_values)
         houses.append(house)
     if not X:
@@ -207,16 +223,23 @@ def convert_models(
     return converted_models
 
 
-def save_thetas(models: dict[str, tuple[float, list[float]]], theta_path: Path) -> None:
+def save_model_parameters(
+    models: dict[str, tuple[float, list[float]]],
+    medians: dict[str, float],
+    model_path: Path,
+) -> None:
     try:
-        with open(theta_path, "w", encoding="utf-8", newline="") as theta_file:
-            writer = csv.writer(theta_file)
+        with open(model_path, "w", encoding="utf-8", newline="") as model_file:
+            writer = csv.writer(model_file)
             writer.writerow(["House", "Bias", *FEATURES])
+            writer.writerow(["Median", "", *(medians[feature] for feature in FEATURES)])
             for house in HOUSES:
                 bias, weights = models[house]
                 writer.writerow([house, bias, *weights])
     except (OSError, csv.Error) as error:
-        raise ValueError(f"Could not save thetas to '{theta_path}': {error}") from error
+        raise ValueError(
+            f"Could not save model parameters to '{model_path}': {error}"
+        ) from error
 
 
 def main() -> int:
@@ -224,12 +247,13 @@ def main() -> int:
         dataset_path = validate_arguments()
         headers, rows = read_csv(dataset_path)
         house_index, feature_columns = validate_training_columns(headers, rows)
-        X, houses = organize_training_data(rows, house_index, feature_columns)
+        medians = calculate_feature_medians(rows, feature_columns)
+        X, houses = organize_training_data(rows, house_index, feature_columns, medians)
         normalized_X, minimums, maximums = normalize_features(X)
         normalized_models = train_one_vs_all(normalized_X, houses, gradient_descent)
         models = convert_models(normalized_models, minimums, maximums)
-        save_thetas(models, THETA_PATH)
-        print(f"Training complete. Thetas saved to '{THETA_PATH.name}'.")
+        save_model_parameters(models, medians, MODEL_PATH)
+        print(f"Training complete. Medians and thetas saved to '{MODEL_PATH.name}'.")
         return 0
     except (OSError, UnicodeError, ValueError, ArithmeticError, csv.Error) as error:
         print(f"Error: {error}", file=sys.stderr)
